@@ -80,6 +80,8 @@ def Complete F := ∀ n, CompleteForN F n
 
 def QuasiComplete F := ∀ n, n > 0 → CompleteForN F n
 
+def id1 : Func 1 := λ b ↦ b 0
+
 def not1 : Func 1 := λ b ↦ ! (b 0)
 
 def true_n : Func n := λ _ ↦ true
@@ -91,12 +93,6 @@ def or2 : Func 2 := λ b ↦ (b 0) || (b 1)
 def and2 : Func 2 := λ b ↦ (b 0) && (b 1)
 
 #print Set
-
-@[simp]
-def NotTrueFam : ∀ n, Set (Func n)
-| 0 => ∅
-| 1 => { f | f = not1 ∨ f = true_n }
-| _ => ∅
 
 @[simp]
 def NotAndOrFam : ∀ n, Set (Func n)
@@ -145,9 +141,11 @@ by
 
 def var_n : Fin n → AppTree F n := λ i ↦ .Var i
 
+def f_tree (f : Func n) (f_mem : f ∈ F n) : AppTree F n := .App f f_mem var_n
+
 @[simp]
 lemma eval_app_eq {F : Family} (f : Func n) (h : f ∈ F n) :
-  evalTree (.App f h var_n) = f := by
+  evalTree (f_tree f h) = f := by
 simp [evalTree]
 
 lemma complete_for_n_mon_1 (F F') n : F ⊆ F' → CompleteForN F n → CompleteForN F' n :=
@@ -160,27 +158,45 @@ by
     exists (bumpTree sub t)
     rw [← eval_bumpTree_eq]; trivial
 
+#check List.indexOf_get
 
-lemma list_complete {F} (ts : List (AppTree F n)) : False
-/- (same_len : (FuncList n.length) = ts.length) →
-   (∀ k : (Fin (FuncList n).length), evalTree (ts.get k) = (FuncList n).get k) →
+
+instance inhabitedAppTree {n : ℕ} [NeZero n] : Inhabited (AppTree F n) :=
+⟨ .Var 0 ⟩
+
+lemma list_complete {F} [NeZero n] (ts : List (AppTree F n)) :
+  let fs := FuncList n
+  ts.length = fs.length →
+  (∀ (i : ℕ) (h : i < fs.length),
+  evalTree (ts.get! i) = fs.get ⟨i, h⟩ ) →
   CompleteForN F n
- -/
- := by
-  sorry
+:= by
+intros fs _ tree_mem f _
+have f_mem_funclist : f ∈ fs :=
+  by apply mem_FuncList
+let i := List.indexOf f fs
+apply Exists.intro (ts.get! i)
+have i_lt_len : i < fs.length := by
+  exact List.indexOf_lt_length.mpr f_mem_funclist
+rw [← @List.indexOf_get _ _ f]
+apply tree_mem
+exact i_lt_len
+
 
 #print Family
 
 def EvalMap (F G : Family) : Type := Π {n} f, f ∈ F n → AppTree G n
 
 def EvalMapSound {F G} (e : EvalMap F G) :=
-  ∀ n f (h : f ∈ F n), evalTree (e f (by trivial)) = f
+  ∀ n f (h : f ∈ F n), evalTree (e f h) = f
 
-def appTreeSubst {F} (t : AppTree F n) (ts : Fin n → AppTree F m) : AppTree F m :=
+-- This is just "plain" substitution for trees, which
+-- takes a term over "n variables" to a term over "m variables"
+def subst {F} (t : AppTree F n) (ts : Fin n → AppTree F m) : AppTree F m :=
 match t with
 | .Var k => ts k
 | .App f mem us =>
-  .App f mem (λ i ↦ appTreeSubst (us i) ts)
+  .App f mem (λ i ↦ subst (us i) ts)
 
 #print AppTree
 
@@ -188,30 +204,85 @@ def mapSubst {F G} (e : EvalMap F G) (t : AppTree F n) : AppTree G n :=
 match t with
 | .Var k => .Var k
 | .App f mem ts =>
-    appTreeSubst (e f mem) (λ i ↦ mapSubst e (ts i))
+    subst (e f mem) (λ i ↦ mapSubst e (ts i))
+
+#print EvalMapSound
 
 @[simp]
-def mapSubst_sound {F G} (e : EvalMap F G) : EvalMapSound e →
+def comp (f : Func n) (g : Fin n → Func m) : Func m :=
+  λ b ↦ f (λ i ↦ g i b)
+
+lemma eval_subst (t : AppTree F n) (s : Fin n → AppTree F m) :
+   evalTree (subst t s) = comp (evalTree t) (λ i ↦ evalTree (s i)) := by
+cases t
+case Var =>
+  simp [subst, comp, evalTree]
+  -- eta all over the place
+  apply Eq.refl
+case App m f f_mem ts =>
+  simp [subst, comp, evalTree]
+  apply funext; intros bs
+  simp [comp]
+  apply congrArg
+  apply funext; intros i
+  rw [eval_subst]
+  apply Eq.refl
+
+#print EvalMapSound
+
+@[simp]
+lemma mapSubst_sound {F G} (e : EvalMap F G) : EvalMapSound e →
   ∀ (t : AppTree F n), evalTree (mapSubst e t) = evalTree t
-:= by sorry
+:= by
+  intros sound t
+  cases t
+  case Var i => simp [mapSubst]; trivial
+  case App n f f_mem ts =>
+  simp [mapSubst, subst]
+  rw [eval_subst]
+  rw [sound]
+  apply funext; intros bs; simp [evalTree]
+  apply congrArg; apply funext; intro i
+  rw [mapSubst_sound]
+  trivial
 
 lemma eval_mon_complete {F F'} : CompleteForN F' n →
-  (∀ f ∈ F' n, ∃ t : AppTree F n, evalTree t = f) →
+  CompleteForFN F F' n →
   CompleteForN F n
 := by sorry
 
-lemma complete_NotTrue_1 : CompleteForN NotTrueFam 1 := by
-  intros f
-  have h_case :
-  (f ![true] = true ∧ f ![false] = true) ∨
-  (f ![true] = false ∧ f ![false] = true) ∨
-  (f ![true] = false ∧ f ![false] = false) ∨
-  (f ![true] = true ∧ f ![false] = false) := by
-    sorry
-  cases h_case
-  case inl h => sorry
-  case inr h => sorry
-
+lemma complete_NotAndOrFam_1 : CompleteForN NotAndOrFam 1 := by
+  apply list_complete [f_tree not1 _]
+  . sorry
+  . intro i;
+    match i with
+    | 0 =>
+      intro _
+      apply funext
+      intros x
+      have x_is_bool : x = λ _ ↦ x 0 := by
+        apply funext
+        intros i
+        cases i; case h n isLt =>
+          cases n
+          case zero => apply Eq.refl
+          case succ => omega
+      rw [x_is_bool]
+      cases (x 0)
+      case h.false =>
+        simp [not1]
+        decide
+        sorry
+      case h.true => sorry
+/-       simp [FuncList, FinEnum.toList];
+      unfold FinEnum.equiv
+      simp [finEnumFunc, inferInstance, List.Pi.finEnum, FinEnum.ofList, FinEnum.ofNodupList]
+      simp [List.Pi.enum, FinEnum.toList, List.map, List.dedup, List.pwFilter] -/
+    | 1 => sorry
+    | 2 => sorry
+    | 3 => sorry
+    | _ + 4 => intros h; contradiction
+  . sorry
 
 theorem complete_NotAndOrFam : QuasiComplete NotAndOrFam :=
 by
