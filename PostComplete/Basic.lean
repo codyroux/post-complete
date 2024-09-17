@@ -96,7 +96,7 @@ def and2 : Func 2 := λ b ↦ (b 0) && (b 1)
 
 @[simp]
 def NotAndOrFam : ∀ n, Set (Func n)
-| 0 => ∅
+| 0 => { f | f = true_n }
 | 1 => { f | f = not1 }
 | 2 => {f | f = and2 ∨ f = or2 }
 | _ => ∅
@@ -251,47 +251,21 @@ lemma eval_mon_complete {F F'} : CompleteForN F' n →
   CompleteForN F n
 := by sorry
 
-lemma complete_NotAndOrFam_1 : CompleteForN NotAndOrFam 1 := by
-  apply list_complete [f_tree not1 _]
-  . sorry
-  . intro i;
-    match i with
-    | 0 =>
-      intro _
-      apply funext
-      intros x
-      have x_is_bool : x = λ _ ↦ x 0 := by
-        apply funext
-        intros i
-        cases i; case h n isLt =>
-          cases n
-          case zero => apply Eq.refl
-          case succ => omega
-      rw [x_is_bool]
-      cases (x 0)
-      case h.false =>
-        simp [not1]
-        decide
-        sorry
-      case h.true => sorry
-/-       simp [FuncList, FinEnum.toList];
-      unfold FinEnum.equiv
-      simp [finEnumFunc, inferInstance, List.Pi.finEnum, FinEnum.ofList, FinEnum.ofNodupList]
-      simp [List.Pi.enum, FinEnum.toList, List.map, List.dedup, List.pwFilter] -/
-    | 1 => sorry
-    | 2 => sorry
-    | 3 => sorry
-    | _ + 4 => intros h; contradiction
-  . sorry
+lemma complete_NotAndOrFam_0 : CompleteForN NotAndOrFam 0 := by
+  sorry
 
-theorem complete_NotAndOrFam : QuasiComplete NotAndOrFam :=
+theorem complete_NotAndOrFam : Complete NotAndOrFam :=
 by
   intros n
   cases n
-  case zero => intros _ h; omega
+  case zero => intros _ h; sorry
   case succ n =>
-    intros _ f
+    intros f h
     let f_true : Func n := inst_fun f n (by simp) true
     let f_false : Func n := inst_fun f n (by simp) false
-    let tree_f := complete_NotAndOrFam _ _ f_true
+    let tree_f_true := complete_NotAndOrFam _ f_true (by simp [Full])
+    let tree_f_false := complete_NotAndOrFam _ f_false (by simp [Full])
+    cases tree_f_true
+    cases tree_f_false
+    case intro.intro t_true h₁ t_false h₂=>
     sorry
