@@ -6,6 +6,19 @@ import Mathlib.Data.FinEnum
 
 abbrev Func n := (Fin n → Bool) → Bool
 
+#print Fin
+
+def unit {α} : Fin 0 → α := λ h ↦ by cases h; omega
+
+#print List.ofFn
+
+
+@[simp]
+lemma unitUnique (x : Fin 0 → Bool) : x = unit := by
+  exact List.ofFn_inj.mp rfl
+
+#print unit
+
 #check λ f : Func 2 ↦ f ![true, true]
 
 #check ![]
@@ -95,15 +108,16 @@ def and2 : Func 2 := λ b ↦ (b 0) && (b 1)
 #print Set
 
 @[simp]
-def NotAndOrFam : ∀ n, Set (Func n)
+def NAOT : ∀ n, Set (Func n)
 | 0 => { f | f = true_n }
 | 1 => { f | f = not1 }
 | 2 => {f | f = and2 ∨ f = or2 }
 | _ => ∅
 
-#print NotAndOrFam
-
-lemma test' : and2 ∈ NotAndOrFam 2 := by simp
+def NAOT.true : {f | f ∈ NAOT 0} := ⟨ true_n, by simp ⟩
+def NAOT.not : {f | f ∈ NAOT 1} := ⟨ not1, by simp ⟩
+def NAOT.and : {f | f ∈ NAOT 2} := ⟨ and2, by simp ⟩
+def NAOT.or : {f | f ∈ NAOT 2} := ⟨ or2, by simp ⟩
 
 def inst_arg (i : Fin n → Bool)(k : ℕ)(_ : k < n + 1)(b : Bool) : Fin (n+1) → Bool
 | ⟨ l, _⟩ =>
@@ -251,21 +265,56 @@ lemma eval_mon_complete {F F'} : CompleteForN F' n →
   CompleteForN F n
 := by sorry
 
-lemma complete_NotAndOrFam_0 : CompleteForN NotAndOrFam 0 := by
-  sorry
+#print AppTree.App
 
-theorem complete_NotAndOrFam : Complete NotAndOrFam :=
+
+-- This is tedious, can't figure out a way to spell this out...
+def trueSyn : AppTree NAOT 0 :=
+  .App true_n (by simp) unit
+
+def notSyn (x : AppTree NAOT n) : AppTree NAOT n :=
+  .App not1 (by simp) ![x]
+
+def andSyn (x  y : AppTree NAOT n) : AppTree NAOT n :=
+  .App and2 (by simp) ![x, y]
+
+def orSyn (x  y : AppTree NAOT n) : AppTree NAOT n :=
+  .App or2 (by simp) ![x, y]
+
+
+lemma complete_NAOT_0 : CompleteForN NAOT 0 := by
+  simp [CompleteForN, CompleteForFN, Full, Func]
+  intros f
+  cases h : (f unit)
+  case false =>
+    exists (notSyn trueSyn)
+    apply funext; intros x
+    simp [evalTree, not1, true_n]
+    trivial
+  case true =>
+    exists trueSyn
+    apply funext; intros x
+    simp [evalTree, true_n]; trivial
+
+#check subst
+
+def liftAppTree (t : AppTree F n) : AppTree F (n+1) :=
+  subst t (λ i ↦ .Var i)
+
+theorem complete_NAOT : Complete NAOT :=
 by
   intros n
   cases n
-  case zero => intros _ h; sorry
+  case zero => apply complete_NAOT_0
   case succ n =>
     intros f h
     let f_true : Func n := inst_fun f n (by simp) true
     let f_false : Func n := inst_fun f n (by simp) false
-    let tree_f_true := complete_NotAndOrFam _ f_true (by simp [Full])
-    let tree_f_false := complete_NotAndOrFam _ f_false (by simp [Full])
+    let tree_f_true := complete_NAOT _ f_true (by simp [Full])
+    let tree_f_false := complete_NAOT _ f_false (by simp [Full])
     cases tree_f_true
     cases tree_f_false
-    case intro.intro t_true h₁ t_false h₂=>
-    sorry
+    case intro.intro t_true h₁ t_false h₂ =>
+      exists (orSyn (andSyn (.Var n) (liftAppTree t_true))
+             (andSyn (notSyn (.Var n)) (liftAppTree t_false)))
+      sorry
