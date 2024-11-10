@@ -86,11 +86,11 @@ class HasEval (F : Family) (n : ℕ) (f : Func n) : Type where
   is_evaltree : evalTree tree = f
 
 -- FIXME: should this be a sigma?
-def CompleteForFN (F G : Family) (n : ℕ) : Prop := ∀ (f : Func n), f ∈ G n → (Nonempty $ HasEval F n f)
+def CompleteForFN (F G : Family) (n : ℕ) : Type := ∀ (f : Func n), f ∈ G n → HasEval F n f
 
 def Full : Family := λ _ ↦ Set.univ
 
-def CompleteForN (F : Family) : ℕ → Prop := CompleteForFN F Full
+def CompleteForN (F : Family) : ℕ → Type := CompleteForFN F Full
 
 -- Shockingly, this definition does not allow us to do any of the "usual" proofs!
 def Complete F := ∀ n, CompleteForN F n
@@ -168,15 +168,15 @@ simp [evalTree]
 
 #print HasEval
 
-lemma complete_for_n_mon_1 (F F') n : F ⊆ F' → CompleteForN F n → CompleteForN F' n :=
+def complete_for_n_mon_1 (F F') n : F ⊆ F' → CompleteForN F n → CompleteForN F' n :=
 by
   simp [CompleteForN, CompleteForFN]
   intros sub h f _
   specialize h f _; trivial
   cases h
-  case intro _ t =>
-    exists (bumpTree sub t.tree)
-    rw [← eval_bumpTree_eq]; simp [t.is_evaltree]
+  case mk t h =>
+    exists (bumpTree sub t)
+    rw [← eval_bumpTree_eq]; simp [h]
 
 #check List.indexOf_get
 
@@ -184,7 +184,7 @@ by
 instance inhabitedAppTree {n : ℕ} [NeZero n] : Inhabited (AppTree F n) :=
 ⟨ .Var 0 ⟩
 
-lemma list_complete {F} [NeZero n] (ts : List (AppTree F n)) :
+def list_complete {F} [NeZero n] (ts : List (AppTree F n)) :
   let fs := FuncList n
   ts.length = fs.length →
   (∀ (i : ℕ) (h : i < fs.length),
@@ -205,10 +205,10 @@ exact i_lt_len
 
 #print Family
 
-def EvalMap (F G : Family) : Type := Π {n} f, f ∈ F n → AppTree G n
+def EvalMap (F G : Family) (n : ℕ) : Type := Π f, f ∈ F n → AppTree G n
 
-def EvalMapSound {F G} (e : EvalMap F G) :=
-  ∀ n f (h : f ∈ F n), evalTree (e f h) = f
+def EvalMapSound {F G} (n : ℕ) (e : EvalMap F G n) :=
+  ∀ f (h : f ∈ F n), evalTree (e f h) = f
 
 -- This is just "plain" substitution for trees, which
 -- takes a term over "n variables" to a term over "m variables"
@@ -220,11 +220,11 @@ match t with
 
 #print AppTree
 
-def mapSubst {F G} (e : EvalMap F G) (t : AppTree F n) : AppTree G n :=
+def mapSubst {F G n} (e : (n : ℕ) → EvalMap F G n) (t : AppTree F n) : AppTree G n :=
 match t with
 | .Var k => .Var k
 | .App f mem ts =>
-    subst (e f mem) (λ i ↦ mapSubst e (ts i))
+    subst (e _ f mem) (λ i ↦ mapSubst e (ts i))
 
 #print EvalMapSound
 
@@ -251,7 +251,8 @@ case App m f f_mem ts =>
 #print EvalMapSound
 
 @[simp]
-lemma mapSubst_sound {F G} (e : EvalMap F G) : EvalMapSound e →
+lemma mapSubst_sound {F G n} (e : (n : ℕ) → EvalMap F G n)
+ : ((n : ℕ) → EvalMapSound n (e n)) →
   ∀ (t : AppTree F n), evalTree (mapSubst e t) = evalTree t
 := by
   intros sound t
@@ -266,10 +267,25 @@ lemma mapSubst_sound {F G} (e : EvalMap F G) : EvalMapSound e →
   rw [mapSubst_sound]
   trivial
 
-lemma eval_mon_complete {F F'} : CompleteForN F' n →
+#print HasEval
+
+-- FIXME Is it redundant to have EvalMap *and* CompleteForFN?
+def complete_eval_map {F G} : CompleteForFN F G n -> EvalMap G F n :=
+by
+  simp [EvalMap, CompleteForFN]
+  exact (λ c f mem ↦ (c f mem).tree)
+
+def eval_mon_complete {F F'} : CompleteForN F' n →
   CompleteForFN F F' n →
   CompleteForN F n
-:= by sorry
+:= by
+  intros comp_F' comp_F_F' f _
+  let ⟨ t, h ⟩ := comp_F' f (by trivial)
+  revert h
+  cases t
+  case Var n =>
+    intros; exists (AppTree.Var n)
+  case App n f' mem ts => sorry
 
 #print AppTree.App
 
@@ -280,6 +296,10 @@ by
   use (.App f h (λ i ↦ .Var i))
   simp [evalTree]
 
+instance hasEvalVar F n k : HasEval F n (· k) :=
+by
+  use (.Var k)
+  simp [evalTree]
 
 instance hasEvalApp0 F f (h : f ∈ F 0) : HasEval F 0 f :=
 by
@@ -287,7 +307,9 @@ by
   simp [evalTree]
   apply funext; simp
 
-instance hasEvalApp1 F n f (h : f ∈ F 1) (g : Func n) [g_eval : HasEval F n g] : HasEval F n (λ b ↦ f ![g b]) :=
+instance hasEvalApp1 F n f (h : f ∈ F 1) (g : Func n)
+ [g_eval : HasEval F n g]
+ : HasEval F n (λ b ↦ f ![g b]) :=
 by
   use (.App f h ![g_eval.tree])
   simp [evalTree]
@@ -297,7 +319,9 @@ by
   apply funext; simp
 
 
-instance hasEvalApp2 F n f (h : f ∈ F 2) (g₁ g₂ : Func n) [g₁_eval : HasEval F n g₁] [g₂_eval : HasEval F n g₂] : HasEval F n (λ b ↦ f ![g₁ b, g₂ b]) :=
+instance hasEvalApp2 F n f (h : f ∈ F 2) (g₁ g₂ : Func n)
+ [g₁_eval : HasEval F n g₁] [g₂_eval : HasEval F n g₂]
+  : HasEval F n (λ b ↦ f ![g₁ b, g₂ b]) :=
 by
   use (.App f h ![g₁_eval.tree, g₂_eval.tree])
   simp [evalTree]
@@ -308,9 +332,9 @@ by
   | 1 => simp; rw [g₂_eval.is_evaltree]
 
 
-lemma complete_NAOT_0 : CompleteForN NAOT 0 := by
+def complete_NAOT_0 : CompleteForN NAOT 0 := by
   simp [CompleteForN, CompleteForFN, Full, Func]
-  intros f
+  intros f _
   cases h : (f unit)
   case false =>
     have h' : f = λ b ↦ not1 ![true_n b] :=
@@ -320,9 +344,8 @@ lemma complete_NAOT_0 : CompleteForN NAOT 0 := by
     rw [h']
     have has_eval_true : HasEval NAOT 0 true_n :=
       by apply hasEvalF; simp
-    constructor; apply hasEvalApp1; simp
+    apply hasEvalApp1; simp
   case true =>
-    constructor
     apply hasEvalF; simp
     apply funext; simp [true_n]; trivial
 
@@ -331,13 +354,7 @@ lemma complete_NAOT_0 : CompleteForN NAOT 0 := by
 def liftAppTree (t : AppTree F n) : AppTree F (n+1) :=
   subst t (λ i ↦ .Var i)
 
-#check HasEval
-#print inst_fun
-
-instance hasEvalInst [HasEval F (n+1) f] [HasEval F 0 true_n] [HasEval F 0 false_n] : HasEval F n (inst_fun f n k b) :=
-by sorry
-
-theorem complete_NAOT : Complete NAOT :=
+def complete_NAOT : Complete NAOT :=
 by
   intros n
   cases n
@@ -346,12 +363,6 @@ by
     intros f h
     let f_true : Func n := inst_fun f n (by simp) true
     let f_false : Func n := inst_fun f n (by simp) false
-    let ⟨ tree_f_true ⟩ := complete_NAOT _ f_true (by simp [Full])
-    let ⟨ tree_f_false ⟩ := complete_NAOT _ f_false (by simp [Full])
-    constructor
-    -- cases tree_f_true
-    -- cases tree_f_false
-    -- case intro.intro t_true h₁ t_false h₂ =>
-    --   exists (orSyn (andSyn (.Var n) (liftAppTree t_true))
-    --          (andSyn (notSyn (.Var n)) (liftAppTree t_false)))
+    let tree_f_true := complete_NAOT _ f_true (by simp [Full])
+    let tree_f_false := complete_NAOT _ f_false (by simp [Full])
     sorry
